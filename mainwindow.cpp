@@ -5,7 +5,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/core/core.hpp>
-#include <opencv/cv.h>
+
 #include <opencv/highgui.h>
 #include <QPixmap>
 #include <QString>
@@ -18,6 +18,13 @@
 #include <fstream>
 #include <sstream>
 
+#include <QCamera>
+#include <QCameraViewfinder>
+#include <QCameraImageCapture>
+#include <QVBoxLayout>
+#include <QMenu>
+#include <QAction>
+#include <QFileDialog>
 
 using namespace cv;
 using namespace std;
@@ -30,6 +37,51 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->setupUi(this);
     this->setWindowIcon(QIcon("C:/Users/mohammed/Desktop/marrakech.png"));
     this->setWindowTitle("Reconaissance Faciale");
+    mCamera = new QCamera(this);
+    mCameraViewfinder = new QCameraViewfinder(this);
+    mCameraImageCapture = new QCameraImageCapture(mCamera, this);
+    mLayout = new QVBoxLayout;
+    mOptionsMenu = new QMenu("Options", this);
+    mDemarrerAction = new QAction("Demarrer", this);
+    mArreterAction = new QAction("Arreter", this);
+    mCapturerAction = new QAction("Capturer", this);
+
+    mOptionsMenu->addActions({ mDemarrerAction, mArreterAction, mCapturerAction });
+    ui->optionsPushButton->setMenu(mOptionsMenu);
+
+    mCamera->setViewfinder(mCameraViewfinder);
+    mLayout->addWidget(mCameraViewfinder);
+    mLayout->setMargin(0);
+    ui->scrollArea->setLayout(mLayout);
+
+    connect(mDemarrerAction, &QAction::triggered, [&]() {
+        mCamera->start();
+    });
+
+    connect(mArreterAction, &QAction::triggered, [&]() {
+        mCamera->stop();
+    });
+
+    connect(mCapturerAction, &QAction::triggered, [&]() {
+        auto filename = QFileDialog::getSaveFileName(this, "Capturer", "/", "Images (*.jpg; *.jpeg)");
+        if (filename.isEmpty()) {
+            return;
+        }
+        mCameraImageCapture->setCaptureDestination(QCameraImageCapture::CaptureToFile);
+        QImageEncoderSettings imageEncoderSettings;
+        imageEncoderSettings.setCodec("image/jpeg");
+        imageEncoderSettings.setResolution(230, 270);
+        mCameraImageCapture->setEncodingSettings(imageEncoderSettings);
+        mCamera->setCaptureMode(QCamera::CaptureStillImage);
+        mCamera->start();
+        mCamera->searchAndLock();
+        mCameraImageCapture->capture(filename);
+        mCamera->unlock();
+
+        FileOpName = filename;
+        ui->pushButton_4->setEnabled(true);
+
+    });
 }
 
 MainWindow::~MainWindow()
@@ -48,8 +100,32 @@ void MainWindow::openImage()
         if( FileOpName.size() )
         {
             imagerd = cv::imread(FileOpName.toUtf8().constData(),1);
+            image = cv::imread(FileOpName.toUtf8().constData(),1);
             cv::resize(imagerd,imagerd,cv::Size(230,270));
             cv::cvtColor(imagerd,imagerd,CV_BGR2RGB);
+
+
+
+            ui->label->setPixmap(QPixmap::fromImage(QImage(imagerd.data, 230, 270, imagerd.step, QImage::Format_RGB888)));
+            imagerdlpb = lbp(imagerd);
+            ui->label_2->setPixmap(QPixmap::fromImage(QImage(imagerdlpb.data, 230, 270, imagerdlpb.step, QImage::Format_Indexed8)));
+            Mat histo = histogram(imagerdlpb);
+            ui->label_3->setPixmap(QPixmap::fromImage(QImage(histo.data, 256, 256, histo.step, QImage::Format_RGB888)));
+        }
+}
+
+void MainWindow::openExistingImage(QString FileOpName)
+{
+        qDebug() << FileOpName;
+        if( FileOpName.size() )
+        {
+            imagerd = cv::imread(FileOpName.toUtf8().constData(),1);
+            image = cv::imread(FileOpName.toUtf8().constData(),1);
+            cv::resize(imagerd,imagerd,cv::Size(230,270));
+            cv::cvtColor(imagerd,imagerd,CV_BGR2RGB);
+
+
+
             ui->label->setPixmap(QPixmap::fromImage(QImage(imagerd.data, 230, 270, imagerd.step, QImage::Format_RGB888)));
             imagerdlpb = lbp(imagerd);
             ui->label_2->setPixmap(QPixmap::fromImage(QImage(imagerdlpb.data, 230, 270, imagerdlpb.step, QImage::Format_Indexed8)));
@@ -137,12 +213,14 @@ cv::Mat MainWindow::histogram(cv::Mat1b const& image)
 void MainWindow::on_pushButton_clicked()
 {
     openImage();
+    ui->pushButton_2->setEnabled(true);
 }
 
 void MainWindow::on_pushButton_2_clicked()
 {
 
-    FichierCsv= QFileDialog::getOpenFileName(this,tr("Open File"), QDir::currentPath(),tr("Image Files (*.csv)"));
+    FichierCsv= QFileDialog::getOpenFileName(this,tr("Open File"), QDir::currentPath(),tr("CSV Files (*.csv)"));
+    qDebug() << FichierCsv;
     string help = FichierCsv.toUtf8().constData();
     qDebug() << "Ca marche !! ";
     read_csv(help,this->images, this->labels,this->corresp,';');
@@ -151,11 +229,45 @@ void MainWindow::on_pushButton_2_clicked()
     cv::cvtColor(imagerd,imagerd,CV_RGB2GRAY);
     qDebug() << "Ca marche !!222 ";
     this->model->train(images, labels);
+    ui->pushButton_3->setEnabled(true);
 }
 
 void MainWindow::on_pushButton_3_clicked()
 {
     int predictedLabel = model->predict(cv::imread(FileOpName.toUtf8().constData(),0));
     ui->label_4->setText("Resultat : "+QString::fromStdString(corresp[predictedLabel]));
+    ui->lineEdit->setText(QString::fromStdString(corresp[predictedLabel]));
+    ui->pushButton_5->setEnabled(true);
+
+}
+
+void MainWindow::on_pushButton_4_clicked()
+{
+    openExistingImage(FileOpName);
+    ui->pushButton_5->setEnabled(true);
+
+}
+
+void MainWindow::on_pushButton_5_clicked()
+{
+
+    map<int, string>::const_iterator it;
+    int key = -1;
+    int max = -1;
+
+    for (it = corresp.begin(); it != corresp.end(); ++it) {
+        const char * c1 = it->second.c_str();
+        const char * c2 = ui->lineEdit->text().toStdString().c_str();
+        if (strcmp(c1, c2)==0) {
+            key = it->first;
+            break;
+        }
+        if(it->first > max) max = it->first;
+    }
+    if (key == -1) key = max + 1;
+    string fichier = FichierCsv.toUtf8().constData();
+    ofstream out(fichier, ios_base::app | ios_base::out);
+    out << FileOpName.toUtf8().constData() << ";" << key << ";" << ui->lineEdit->text().toUtf8().constData() << "\n";
+    ui->label_6->setText("Ajoutée (id: "+QString::number(key)+")");
 
 }
